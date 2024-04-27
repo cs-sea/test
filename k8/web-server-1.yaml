@@ -1,0 +1,101 @@
+apiVersion: apps/v1        # 指定api版本，此值必须在kubectl api-versions中。业务场景一般首选”apps/v1“
+kind: Deployment        # 指定创建资源的角色/类型
+metadata:          # 资源的元数据/属性
+  name: web-server-1      # 资源的名字，在同一个namespace中必须唯一
+  namespace: default     # 部署在哪个namespace中。不指定时默认为default命名空间
+  labels:          # 自定义资源的标签
+    app: web-server-1
+    version: v0.0.1
+  annotations:  # 自定义注释列表
+    name: test
+spec:     # 资源规范字段，定义deployment资源需要的参数属性，诸如是否在容器失败时重新启动容器的属性
+  replicas: 3     # 声明副本数目
+  revisionHistoryLimit: 3     # 保留历史版本
+  selector:     # 标签选择器
+    matchLabels:     # 匹配标签，需与上面的标签定义的app保持一致
+      app: web-server-1
+      version: v0.0.1
+  strategy:     # 策略
+    type: RollingUpdate     # 滚动更新策略
+      # ecreate：删除所有已存在的pod,重新创建新的
+      # RollingUpdate：滚动升级，逐步替换的策略，同时滚动升级时，支持更多的附加参数，
+    # 例如设置最大不可用pod数量，最小升级间隔时间等等
+    rollingUpdate:             # 滚动更新
+      maxSurge: 1             # 滚动升级时最大额外可以存在的副本数，可以为百分比，也可以为整数
+      maxUnavailable: 0     # 在更新过程中进入不可用状态的 Pod 的最大值，可以为百分比，也可以为整数
+  template:     # 定义业务模板，如果有多个副本，所有副本的属性会按照模板的相关配置进行匹配
+    metadata:     # 资源的元数据/属性
+      annotations:         # 自定义注解列表
+        sidecar.istio.io/inject: "false"     # 自定义注解名字
+      labels:     # 自定义资源的标签
+        app: web-server-1    # 模板名称必填
+        version: v0.0.1
+    spec:     # 资源规范字段
+      restartPolicy: Always        # Pod的重启策略。[Always | OnFailure | Nerver]
+        # Always ：在任何情况下，只要容器不在运行状态，就自动重启容器。默认
+        # OnFailure ：只在容器异常时才自动容器容器。
+        # 对于包含多个容器的pod，只有它里面所有的容器都进入异常状态后，pod才会进入Failed状态
+      # Nerver ：从来不重启容器
+      volumes:
+        - name: secret-volume
+          secret:
+            secretName: my-secret
+      containers:        # Pod中容器列表
+        - name: web-server-1         # 容器的名字
+          image: robert0623/web-server1:v0.0.1          # 容器使用的镜像地址
+          imagePullPolicy: IfNotPresent     # 每次Pod启动拉取镜像策略
+          workingDir: /app      # 容器的工作目录
+          volumeMounts:        # 挂载到容器内部的存储卷配置
+            - name: secret-volume
+              mountPath: /app/secret
+          ports:    # 需要暴露的端口库号列表
+            - name: http     # 端口号名称
+              containerPort: 1323     # 容器开放对外的端口
+              # hostPort: 8080    # 容器所在主机需要监听的端口号，默认与Container相同
+              protocol: TCP     # 端口协议，支持TCP和UDP，默认TCP
+          env:    # 容器运行前需设置的环境变量列表
+            - name: KEY1
+              valueFrom:
+                configMapKeyRef:
+                  name: my-configmap
+                  key: port
+            - name: KEY2
+              valueFrom:
+                configMapKeyRef:
+                  name: my-configmap
+                  key: test
+            - name: string     # 环境变量名称
+              value: string    # 环境变量的值
+          resources:     # 资源管理。资源限制和请求的设置
+            limits:     # 资源限制的设置，最大使用
+              cpu: "1"         # CPU，"1"(1核心) = 1000m。将用于docker run --cpu-shares参数
+              memory: 501Mi     # 内存，1G = 1024Mi。将用于docker run --memory参数
+            requests:  # 资源请求的设置。容器运行时，最低资源需求，也就是说最少需要多少资源容器才能正常运行
+              cpu: 100m
+              memory: 100Mi
+          livenessProbe:     # pod内部的容器的健康检查的设置。当探测无响应几次后将自动重启该容器
+            # 检查方法有exec、httpGet和tcpSocket，对一个容器只需设置其中一种方法即可
+            httpGet: # 通过httpget检查健康，返回200-399之间，则认为容器正常
+              path: /healthCheck     # URI地址。如果没有心跳检测接口就为/
+              port: 1323         # 端口
+              scheme: HTTP     # 协议
+            initialDelaySeconds: 0     # 容器启动完成后首次探测的时间，单位为秒
+            timeoutSeconds: 5     # 对容器健康检查等待响应的超时时间，单位秒，默认1秒
+            periodSeconds: 30     # 对容器监控检查的定期探测间隔时间设置，单位秒，默认10秒一次
+            successThreshold: 1     # 成功门槛
+            failureThreshold: 5     # 失败门槛，连接失败5次，pod杀掉，重启一个新的pod
+          readinessProbe:         # Pod准备服务健康检查设置
+            httpGet:
+              path: /healthCheck    # 如果没有心跳检测接口就为/
+              port: 1323
+              scheme: HTTP
+            initialDelaySeconds: 5
+            timeoutSeconds: 5
+            periodSeconds: 10
+            successThreshold: 1
+            failureThreshold: 5
+      imagePullSecrets:     # 镜像仓库拉取镜像时使用的密钥，以key：secretkey格式指定
+        - name: harbor-certification
+      hostNetwork: false    # 是否使用主机网络模式，默认为false，如果设置为true，表示使用宿主机网络
+      terminationGracePeriodSeconds: 30     # 优雅关闭时间，这个时间内优雅关闭未结束，k8s 强制 kill
+      dnsPolicy: ClusterFirst    # 设置Pod的DNS的策略。默认ClusterFirst
